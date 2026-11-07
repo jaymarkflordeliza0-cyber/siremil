@@ -167,6 +167,8 @@ input::placeholder { color: var(--text-3); }
 .field.invalid input:focus { box-shadow: 0 0 0 4px var(--danger-soft); }
 .hint { display: block; margin-top: 6px; font-size: 12px; color: var(--text-3); }
 .field.invalid .hint { display: none; }
+.hint.flash { animation: hintFlash 1.6s var(--ease); }
+@keyframes hintFlash { 0%, 60% { color: var(--brand); font-weight: 700; } }
 .error { display: block; min-height: 0; color: var(--danger); font-size: 12.5px; font-weight: 500; margin-top: 6px; }
 .error:empty { display: none; }
 .field.invalid { animation: shake .35s; }
@@ -360,6 +362,7 @@ details.json-toggle .json-box { margin-top: 12px; }
 .toast .ico { width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; flex-shrink: 0; }
 .toast.ok .ico { background: var(--high-soft); color: var(--high); }
 .toast.err .ico { background: var(--danger-soft); color: var(--danger); }
+.toast.info .ico { background: var(--medium-soft); color: var(--medium); }
 @keyframes toastIn { from { opacity: 0; transform: translateY(16px) scale(.96); } }
 @keyframes toastOut { to { opacity: 0; transform: translateX(30px); } }
 

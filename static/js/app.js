@@ -58,6 +58,35 @@
       })
     );
   });
+  // Working hours: while typing, keep the value inside 1-168.
+  //   above 168 -> set back to 168
+  //   0 (or below 1) -> set back to 1
+  $$('input[name="working_hours"]').forEach((input) => {
+    const min = Number(input.min);
+    const max = Number(input.max);
+    input.addEventListener("input", () => {
+      if (input.value === "" || isNaN(input.value)) return; // still typing / empty
+      const value = Number(input.value);
+      let message = "";
+      if (value > max) {
+        input.value = max;
+        message = `Maximum is ${max} hours per week, so it was set to ${max}.`;
+      } else if (value < min) {
+        input.value = min;
+        message = `Minimum is ${min} hour per week, so it was set to ${min}.`;
+      } else {
+        return;
+      }
+      const hint = $(".hint", input.closest(".field"));
+      if (hint) {
+        hint.classList.remove("flash");
+        void hint.offsetWidth; // restart the highlight animation
+        hint.classList.add("flash");
+      }
+      toast(message, "info");
+    });
+  });
+
   $$(".range[data-sync]").forEach((range) => {
     const input = document.getElementById(range.dataset.sync);
     const paint = () => {
@@ -145,6 +174,8 @@
 
   /* ---------------- Toasts ---------------- */
   function toast(msg, type = "ok") {
+    // Only one "info" notice at a time, so repeated typing doesn't stack them up
+    if (type === "info") $$(".toast.info").forEach((old) => old.remove());
     const t = document.createElement("div");
     t.className = "toast " + type;
     t.innerHTML = `<span class="ico">${
@@ -321,7 +352,7 @@
           <div class="result-top">
             <div class="who">
               <div class="avatar">${esc(initials(r.employee_name))}</div>
-              <div><h3>${esc(r.employee_name)}</h3><p>${esc(r.education)} · ${r.working_hours} hrs/week</p></div>
+              <div><h3>${esc(r.employee_name)}</h3><p>${esc(r.education)} · ${r.working_hours} hr${r.working_hours == 1 ? "" : "s"}/week</p></div>
             </div>
           </div>
           <div class="versus">
