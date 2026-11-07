@@ -10,7 +10,8 @@ System flow:
 Uses ONLY the Python standard library and runs completely offline.
 Every salary value comes from the saved Activity 1 model, `salary_model.pkl`.
 
-    python app.py      ->  open http://127.0.0.1:5000
+    python app.py               ->  starts the server AND opens the browser automatically
+    python app.py --no-browser  ->  starts the server only
 """
 
 import csv
@@ -20,8 +21,10 @@ import math
 import mimetypes
 import os
 import pickle
+import sys
 import threading
 import uuid
+import webbrowser
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -392,14 +395,46 @@ def create_server(host=HOST, port=PORT):
     return ThreadingHTTPServer((host, port), Handler)
 
 
+def start_server(host=HOST, first_port=PORT, tries=10):
+    """Start on the first free port (5000, 5001, ...) in case one is busy."""
+    for port in range(first_port, first_port + tries):
+        try:
+            return create_server(host, port)
+        except OSError:
+            print(f"Port {port} is busy, trying {port + 1}...")
+    raise OSError(f"No free port found between {first_port} and {first_port + tries - 1}.")
+
+
+def open_browser(url):
+    """Open the local page automatically. 127.0.0.1 is this computer, so no internet is needed."""
+    try:
+        webbrowser.open(url, new=2)
+    except Exception:
+        print(f"Could not open the browser automatically. Please open {url}")
+
+
 if __name__ == "__main__":
-    print(f"Model loaded : {MODEL_PATH}")
-    print(f"Coefficients : {COEFFICIENTS}")
-    print(f"Education    : {', '.join(EDUCATION_LEVELS)}")
-    print(f"History file : {HISTORY_PATH}")
-    print(f"Open http://{HOST}:{PORT} in your browser (works offline). Press Ctrl+C to stop.")
-    server = create_server()
+    server = start_server()
+    url = f"http://{HOST}:{server.server_address[1]}"
+
+    print("=" * 60)
+    print(" SalaryScope - Employee Salary Prediction System (OFFLINE)")
+    print("=" * 60)
+    print(f" Model loaded : {MODEL_PATH}")
+    print(f" Coefficients : {COEFFICIENTS}")
+    print(f" Education    : {', '.join(EDUCATION_LEVELS)}")
+    print(f" History file : {HISTORY_PATH}")
+    print(f" Running at   : {url}")
+    print(" Press Ctrl+C to stop.")
+    print("=" * 60)
+
+    if "--no-browser" not in sys.argv:
+        # Wait a moment so the server is ready, then open the browser.
+        threading.Timer(1.0, open_browser, args=(url,)).start()
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nServer stopped.")
+    finally:
+        server.server_close()

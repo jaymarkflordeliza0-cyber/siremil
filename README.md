@@ -23,7 +23,11 @@ UI extras: light and dark mode, animated results, a salary-range meter, a compar
 
 ## Run
 ```bash
-python app.py                          # open http://127.0.0.1:5000
+python app.py            # starts the server AND opens the browser automatically
+python app.py --no-browser   # server only
+```
+On Windows you can also just **double-click `run_app.bat`**. If port 5000 is busy, the app uses the next free port (5001, 5002, ...). Everything runs on `127.0.0.1` (this computer), so no internet is needed.
+```
 ```
 
 ## API examples
@@ -45,4 +49,4 @@ python -m unittest test_app -v
 The tests cover 5 predictions, 2 comparisons, the classification thresholds, validation, and a simulated restart. They write to a temporary history file, so your real `salary_history.csv` is not changed.
 
 ## Files
-`app.py` (server) · `salary_model.pkl` (Activity 1 saved model) · `templates/` + `static/` (UI) · `test_app.py` · `salary_history.csv` (created automatically)
+`app.py` (server) · `run_app.bat` (double-click launcher) · `salary_model.pkl` (Activity 1 saved model) · `templates/` + `static/` (UI) · `test_app.py` · `salary_history.csv` (created automatically)
