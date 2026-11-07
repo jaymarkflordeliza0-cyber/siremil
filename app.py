@@ -288,9 +288,20 @@ def read_simple_pickle(data):
             raise ValueError("salary_model.pkl contains unsupported data (opcode %r)." % op)
 
 
+class ModelError(Exception):
+    """salary_model.pkl is missing or is not the Activity 1 model."""
+
+
+WRONG_MODEL_HELP = (
+    "Replace it with YOUR salary_model.pkl from Laboratory Activity 1.\n"
+    "That file is a dictionary with 'coefficients' and 'education'.\n"
+    "(A scikit-learn / joblib model, or a damaged download, cannot be used here.)"
+)
+
+
 def load_model(path=MODEL_PATH):
     if not os.path.exists(path):
-        raise IOError(
+        raise ModelError(
             "Saved model not found: %s\n"
             "Copy salary_model.pkl from Laboratory Activity 1 next to app.py." % path
         )
@@ -300,15 +311,30 @@ def load_model(path=MODEL_PATH):
         data = pickle.loads(raw)
     except Exception:
         # Older Python that cannot read this pickle format -> built-in reader
-        data = read_simple_pickle(raw)
+        try:
+            data = read_simple_pickle(raw)
+        except Exception:
+            raise ModelError("Cannot read %s.\n%s" % (path, WRONG_MODEL_HELP))
     if not isinstance(data, dict) or "coefficients" not in data or "education" not in data:
-        raise ValueError("salary_model.pkl must contain 'coefficients' and 'education'.")
+        raise ModelError("%s is not the Activity 1 model.\n%s" % (path, WRONG_MODEL_HELP))
     if len(data["coefficients"]) != 4:
-        raise ValueError("Expected 4 coefficients: intercept, education, experience, hours.")
+        raise ModelError(
+            "%s has %d coefficients; expected 4 (intercept, education, experience, hours)."
+            % (path, len(data["coefficients"]))
+        )
     return data
 
 
-model = load_model()
+try:
+    model = load_model()
+except ModelError as err:
+    print("")
+    print("=" * 60)
+    print(" SalaryScope could not start")
+    print("=" * 60)
+    print(" %s" % str(err).replace("\n", "\n "))
+    print("=" * 60)
+    sys.exit(1)
 COEFFICIENTS = [float(c) for c in model["coefficients"]]
 EDUCATION_CODES = dict((to_text(k), v) for k, v in model["education"].items())
 # Education levels supported by the ORIGINAL model, in their encoded order

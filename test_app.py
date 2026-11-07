@@ -219,6 +219,19 @@ class SalaryAppTests(unittest.TestCase):
             data = pickle.dumps(sample, protocol)
             self.assertEqual(self.app.read_simple_pickle(data), sample, "protocol %d" % protocol)
 
+    # ---------------- Wrong model file gives a clear message ----------------
+    def test_wrong_model_file_is_reported(self):
+        for content in (b"not a pickle at all", pickle.dumps([1, 2, 3], 2)):
+            bad = os.path.join(self.tmp, "bad_model.pkl")
+            with open(bad, "wb") as f:
+                f.write(content)
+            try:
+                self.app.load_model(bad)
+            except self.app.ModelError as err:
+                self.assertIn("Activity 1", str(err))
+            else:
+                self.fail("ModelError was not raised")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
