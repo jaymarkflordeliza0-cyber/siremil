@@ -21,6 +21,9 @@ The education levels are read from the model and used for validation. The model 
 
 UI extras: light and dark mode, animated results, a salary-range meter, a comparison chart, a highlighted JSON output with a Copy button, history search and filters, summary stats, CSV download, and a mobile layout. There are no CDNs or web fonts, so everything works without internet.
 
+## Requirements
+**Python 3.6 or newer** on Windows, macOS or Linux. Nothing else to install. Tested on Python 3.8, 3.9, 3.10, 3.11, 3.12, 3.13 and 3.14. Python 2 is not supported.
+
 ## Run
 ```bash
 python app.py            # starts the server AND opens the browser automatically

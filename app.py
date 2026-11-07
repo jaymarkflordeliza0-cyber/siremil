@@ -26,8 +26,15 @@ import threading
 import uuid
 import webbrowser
 from datetime import datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, urlparse
+
+
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    """Same as http.server.ThreadingHTTPServer (3.7+), defined here so Python 3.6 works too."""
+
+    daemon_threads = True
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.environ.get("SALARY_MODEL_PATH", os.path.join(BASE_DIR, "salary_model.pkl"))
