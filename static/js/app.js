@@ -281,7 +281,7 @@
           ${meterHTML(r.predicted_salary, r.salary_range)}
           <div class="facts">
             <div class="fact"><span>Education</span><b>${esc(r.education)}</b></div>
-            <div class="fact"><span>Experience</span><b>${r.years_experience} yr${r.years_experience == 1 ? "" : "s"}</b></div>
+            <div class="fact"><span>Experience</span><b>${r.experience} yr${r.experience == 1 ? "" : "s"}</b></div>
             <div class="fact"><span>Hours / week</span><b>${r.working_hours}</b></div>
           </div>
           ${jsonBlock(r, false)}

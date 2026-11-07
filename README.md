@@ -2,13 +2,22 @@
 
 **Activity 3: Salary Comparison and Prediction History.** It runs entirely offline and uses **only the Python standard library**, so there is nothing to install. Every salary it shows comes from the Activity 1 model, `salary_model.pkl`.
 
-## The saved model (from Activity 1)
-`salary_model.pkl` is a dictionary with `coefficients` = `[intercept, education, experience, hours]`, an `education` code map (High School=0 … Doctorate=4), and `training_records`. The app computes:
+## Activity 1: dataset, training and saved model
+| File | What it is |
+|---|---|
+| `salary_dataset.csv` | Training dataset with 24 employee records (experience, education, weekly hours, monthly salary) |
+| `train_model.py` | Trains a multiple linear regression (least squares, pure Python) and saves `salary_model.pkl` with Pickle |
+| `salary_model.pkl` | The saved model: `coefficients` = `[intercept, education, experience, hours]`, an `education` code map (High School=0 to Doctorate=4), and `training_records` |
 
+```bash
+python train_model.py     # run once: dataset -> train -> salary_model.pkl
+python app.py             # loads the saved model (no retraining) and opens the browser
 ```
-salary = intercept + b_edu × education_code + b_exp × years_experience + b_hours × working_hours
+The app computes:
 ```
-The education levels are read from the model and used for validation. The model is never retrained.
+salary = intercept + b_edu * education_code + b_exp * years_experience + b_hours * working_hours
+```
+`/predict` accepts `experience` (Activity 1) or `years_experience` (web page) and returns the Activity 1 fields in order: `employee_name`, `experience`, `education`, `working_hours`, `predicted_salary`, `currency`, plus `salary_range` and `timestamp`.
 
 ## Features
 | Feature | Where |
@@ -38,7 +47,7 @@ On Windows you can also just **double-click `run_app.bat`**. If port 5000 is bus
 ## API examples
 ```bash
 curl -X POST http://127.0.0.1:5000/predict -H "Content-Type: application/json" \
-  -d '{"employee_name":"Juan Dela Cruz","education":"Bachelor'"'"'s Degree","years_experience":3,"working_hours":48}'
+  -d '{"employee_name":"Juan Dela Cruz","experience":5,"education":"Bachelor'"'"'s Degree","working_hours":40}'
 
 curl -X POST http://127.0.0.1:5000/compare -H "Content-Type: application/json" \
   -d '{"employee_name":"Juan Dela Cruz","education":"Bachelor'"'"'s Degree","working_hours":48,"experience_1":3,"experience_2":5}'
@@ -55,4 +64,4 @@ python -m unittest test_app -v
 The tests cover 5 predictions, 2 comparisons, the classification thresholds, validation, and a simulated restart. They write to a temporary history file, so your real `salary_history.csv` is not changed.
 
 ## Files
-`app.py` (server) · `run_app.bat` (double-click launcher) · `salary_model.pkl` (Activity 1 saved model) · `make_model.py` (recreates that exact file if it gets lost or replaced) · `templates/` + `static/` (UI) · `test_app.py` · `salary_history.csv` (created automatically)
+`app.py` (server) · `run_app.bat` (double-click launcher) · `train_model.py` + `salary_dataset.csv` (Activity 1) · `salary_model.pkl` (saved model) · `templates/` + `static/` (UI) · `test_app.py` · `salary_history.csv` (created automatically)

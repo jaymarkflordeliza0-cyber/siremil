@@ -129,7 +129,7 @@ _history_lock = threading.Lock()
 # --------------------------------------------------------------------------
 # Model loading (the Activity 1 model is used as-is - never retrained)
 # --------------------------------------------------------------------------
-# salary_model.pkl from Activity 1 is a dictionary:
+# salary_model.pkl is created by train_model.py (Activity 1). It is a dictionary:
 #   {
 #     "coefficients": [intercept, b_education, b_experience, b_hours],
 #     "education": {"High School": 0, "Associate Degree": 1, ...},
@@ -293,7 +293,7 @@ class ModelError(Exception):
 
 
 WRONG_MODEL_HELP = (
-    "Replace it with YOUR salary_model.pkl from Laboratory Activity 1.\n"
+    "Run  python train_model.py  to create it again from salary_dataset.csv.\n"
     "That file is a dictionary with 'coefficients' and 'education'.\n"
     "(A scikit-learn / joblib model, or a damaged download, cannot be used here.)"
 )
@@ -303,7 +303,7 @@ def load_model(path=MODEL_PATH):
     if not os.path.exists(path):
         raise ModelError(
             "Saved model not found: %s\n"
-            "Copy salary_model.pkl from Laboratory Activity 1 next to app.py." % path
+            "Run  python train_model.py  first to train and save the model." % path
         )
     with open(path, "rb") as f:
         raw = f.read()
@@ -489,21 +489,25 @@ def validate_experience(data, key, label, errors):
 def handle_predict(data):
     errors = {}
     name, education, hours = validate_common(data, errors)
-    exp = validate_experience(data, "years_experience", "Years of experience", errors)
+    # Activity 1 sends "experience"; the web page sends "years_experience". Both work.
+    exp_key = "experience" if "experience" in data else "years_experience"
+    exp = validate_experience(data, exp_key, "Years of experience", errors)
     if errors:
         raise ValidationError(errors)
 
     salary = predict_salary(education, exp, hours)
     record = make_record("predict", name, education, exp, hours, salary)
     save_history([record])
+    # Same fields and order as the Activity 1 expected output, plus the
+    # Activity 3 salary range and timestamp.
     return ordered(
         ("employee_name", name),
+        ("experience", exp),
         ("education", education),
         ("working_hours", hours),
-        ("years_experience", exp),
         ("predicted_salary", salary),
-        ("salary_range", record["salary_range"]),
         ("currency", CURRENCY),
+        ("salary_range", record["salary_range"]),
         ("timestamp", record["timestamp"]),
     )
 

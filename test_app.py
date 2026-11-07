@@ -38,7 +38,8 @@ class Response(object):
         self._body = body
 
     def get_json(self):
-        return json.loads(self._body)
+        from collections import OrderedDict
+        return json.loads(self._body, object_pairs_hook=OrderedDict)  # keep field order
 
 
 class Client(object):
@@ -120,6 +121,7 @@ class SalaryAppTests(unittest.TestCase):
             self.assertEqual(body["predicted_salary"], expected)
             self.assertEqual(body["salary_range"], self.app.classify_salary(expected))
             self.assertEqual(body["currency"], "PHP")
+            self.assertEqual(body["experience"], exp)
             print("  predict  %-16s -> PHP %12s  %s"
                   % (name, self.app.money(body["predicted_salary"], 2), body["salary_range"]))
         self.assertEqual(len(self.rows()), 5)
@@ -228,9 +230,30 @@ class SalaryAppTests(unittest.TestCase):
             try:
                 self.app.load_model(bad)
             except self.app.ModelError as err:
-                self.assertIn("Activity 1", str(err))
+                self.assertIn("train_model.py", str(err))
             else:
                 self.fail("ModelError was not raised")
+
+    # ---------------- Activity 1: same request/response format ----------------
+    def test_activity1_predict_format(self):
+        r = self.client.post("/predict", {"employee_name": "Juan Dela Cruz", "experience": 5,
+                                          "education": "Bachelor's Degree", "working_hours": 40})
+        self.assertEqual(r.status_code, 200)
+        body = r.get_json()
+        self.assertEqual(list(body)[:6], ["employee_name", "experience", "education",
+                                          "working_hours", "predicted_salary", "currency"])
+        self.assertEqual(body["experience"], 5)
+
+    # ---------------- Activity 1: training reproduces the saved model ----------------
+    def test_training_reproduces_saved_model(self):
+        import train_model
+        records = train_model.load_dataset()
+        self.assertGreaterEqual(len(records), 20)
+        coefficients = train_model.train(records)
+        for got, saved in zip(coefficients, self.app.COEFFICIENTS):
+            self.assertAlmostEqual(got, saved, places=6)
+        r2, _ = train_model.evaluate(coefficients, records)
+        self.assertGreater(r2, 0.9)
 
 
 if __name__ == "__main__":
