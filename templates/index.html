@@ -86,6 +86,7 @@
                 <input id="p_exp" name="years_experience" type="number" min="0" step="1" value="3" inputmode="decimal">
                 <button type="button" class="step" data-step="1" aria-label="Increase">+</button>
               </div>
+              <small class="hint">Allowed: 0 or greater</small>
               <small class="error" data-for="years_experience"></small>
             </div>
             <div class="field">
@@ -95,7 +96,8 @@
                 <input id="p_hours" name="working_hours" type="number" min="{{ min_hours }}" max="{{ max_hours }}" step="1" value="40" inputmode="decimal">
                 <button type="button" class="step" data-step="1" aria-label="Increase">+</button>
               </div>
-              <input class="range" type="range" min="{{ min_hours }}" max="80" value="40" data-sync="p_hours" aria-label="Working hours slider">
+              <input class="range" type="range" min="{{ min_hours }}" max="{{ max_hours }}" value="40" data-sync="p_hours" aria-label="Working hours slider">
+              <small class="hint">Allowed: {{ min_hours }} to {{ max_hours }} hours per week</small>
               <small class="error" data-for="working_hours"></small>
             </div>
           </div>
@@ -152,7 +154,8 @@
               <input id="c_hours" name="working_hours" type="number" min="{{ min_hours }}" max="{{ max_hours }}" step="1" value="48" inputmode="decimal">
               <button type="button" class="step" data-step="1" aria-label="Increase">+</button>
             </div>
-            <input class="range" type="range" min="{{ min_hours }}" max="80" value="48" data-sync="c_hours" aria-label="Working hours slider">
+            <input class="range" type="range" min="{{ min_hours }}" max="{{ max_hours }}" value="48" data-sync="c_hours" aria-label="Working hours slider">
+            <small class="hint">Allowed: {{ min_hours }} to {{ max_hours }} hours per week</small>
             <small class="error" data-for="working_hours"></small>
           </div>
 
@@ -164,6 +167,7 @@
                 <input id="c_exp1" name="experience_1" type="number" min="0" step="1" value="3" inputmode="decimal">
                 <button type="button" class="step" data-step="1" aria-label="Increase">+</button>
               </div>
+              <small class="hint">Allowed: 0 or greater</small>
               <small class="error" data-for="experience_1"></small>
             </div>
             <div class="vs">vs</div>
@@ -174,6 +178,7 @@
                 <input id="c_exp2" name="experience_2" type="number" min="0" step="1" value="5" inputmode="decimal">
                 <button type="button" class="step" data-step="1" aria-label="Increase">+</button>
               </div>
+              <small class="hint">Allowed: 0 or greater</small>
               <small class="error" data-for="experience_2"></small>
             </div>
           </div>
