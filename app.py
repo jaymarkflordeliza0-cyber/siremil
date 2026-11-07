@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Employee Salary Prediction System
 Salary Comparison and Prediction History (Activity 3)
@@ -7,6 +8,7 @@ System flow:
     -> Classify Salary Range -> Save Prediction History
     -> Compare Two Experience Levels -> Calculate Difference -> Display JSON Output
 
+Works on Python 2.7 and every Python 3 version.
 Uses ONLY the Python standard library and runs completely offline.
 Every salary value comes from the saved Activity 1 model, `salary_model.pkl`.
 
@@ -14,28 +16,86 @@ Every salary value comes from the saved Activity 1 model, `salary_model.pkl`.
     python app.py --no-browser  ->  starts the server only
 """
 
+from __future__ import division, print_function
+
 import csv
-import html
+import io
 import json
-import math
-import mimetypes
 import os
 import pickle
+import struct
 import sys
 import threading
 import uuid
 import webbrowser
 from datetime import datetime
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from socketserver import ThreadingMixIn
-from urllib.parse import parse_qs, urlparse
+
+# ---- Python 2 / Python 3 compatibility -----------------------------------
+PY2 = sys.version_info[0] == 2
+
+if PY2:  # Python 2.7
+    from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
+    from SocketServer import ThreadingMixIn
+    from urlparse import parse_qs, urlparse
+    from cgi import escape as _escape
+
+    text_type = unicode  # noqa: F821  (only exists on Python 2)
+    string_types = (str, unicode)  # noqa: F821
+else:  # Python 3.x
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from socketserver import ThreadingMixIn
+    from urllib.parse import parse_qs, urlparse
+
+    try:
+        from html import escape as _escape
+    except ImportError:  # Python 3.0 / 3.1
+        from cgi import escape as _escape
+
+    text_type = str
+    string_types = (str,)
+
+try:
+    from collections import OrderedDict  # keeps JSON fields in a fixed order
+except ImportError:  # Python 3.0
+    OrderedDict = dict
+
+import mimetypes
+
+
+def html_escape(value):
+    return _escape(value, True).replace("'", "&#x27;")
+
+
+def to_text(value):
+    """Return value as unicode text on both Python 2 and Python 3."""
+    if isinstance(value, bytes) and not isinstance(value, text_type):
+        return value.decode("utf-8")
+    return text_type(value)
+
+
+def is_finite(x):
+    return not (x != x or x in (float("inf"), float("-inf")))
+
+
+def money(value, decimals=0):
+    """Format a number like 20,000 or 49,999.99 (works on every Python version)."""
+    text = ("%." + str(decimals) + "f") % value
+    whole, _, frac = text.partition(".")
+    sign = "-" if whole.startswith("-") else ""
+    whole = whole.lstrip("-")
+    groups = []
+    while len(whole) > 3:
+        groups.insert(0, whole[-3:])
+        whole = whole[:-3]
+    groups.insert(0, whole)
+    return sign + ",".join(groups) + ("." + frac if frac else "")
 
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
-    """Same as http.server.ThreadingHTTPServer (3.7+), defined here so Python 3.6 works too."""
-
     daemon_threads = True
 
+
+# ---- Settings ------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.environ.get("SALARY_MODEL_PATH", os.path.join(BASE_DIR, "salary_model.pkl"))
 HISTORY_PATH = os.environ.get("SALARY_HISTORY_PATH", os.path.join(BASE_DIR, "salary_history.csv"))
@@ -67,7 +127,7 @@ _history_lock = threading.Lock()
 
 
 # --------------------------------------------------------------------------
-# Model loading (the Activity 1 model is used as-is — never retrained)
+# Model loading (the Activity 1 model is used as-is - never retrained)
 # --------------------------------------------------------------------------
 # salary_model.pkl from Activity 1 is a dictionary:
 #   {
@@ -77,14 +137,170 @@ _history_lock = threading.Lock()
 #   }
 # predicted monthly salary =
 #   intercept + b_education * education_code + b_experience * years + b_hours * hours
+
+
+def read_simple_pickle(data):
+    """
+    Read a pickle that holds only plain data (dict, list, tuple, str, int,
+    float, bool, None) - for any pickle protocol 0 to 5.
+
+    Python 2.7 and Python 3.0-3.3 cannot read pickle protocol 4 (the format
+    of salary_model.pkl). This small reader lets those versions load the
+    SAME file without changing or retraining the model. It never runs code
+    from the file.
+    """
+    buf = bytearray(data)
+    pos = [0]
+    stack, marks, memo = [], [], {}
+
+    def take(n):
+        start = pos[0]
+        if start + n > len(buf):
+            raise ValueError("salary_model.pkl is incomplete.")
+        pos[0] = start + n
+        return bytes(buf[start:start + n])
+
+    def take_line():
+        end = buf.find(b"\n", pos[0])
+        if end < 0:
+            raise ValueError("salary_model.pkl is incomplete.")
+        line = bytes(buf[pos[0]:end])
+        pos[0] = end + 1
+        return line
+
+    def pop_mark():
+        items = stack[marks[-1]:]
+        del stack[marks.pop():]
+        return items
+
+    def text(raw):
+        return raw.decode("utf-8")
+
+    while True:
+        op = chr(bytearray(take(1))[0])
+        if op == "\x80":    # PROTO
+            take(1)
+        elif op == "\x95":  # FRAME
+            take(8)
+        elif op == ".":     # STOP
+            return stack.pop()
+        elif op == "(":     # MARK
+            marks.append(len(stack))
+        elif op == "}":     # EMPTY_DICT
+            stack.append({})
+        elif op == "]":     # EMPTY_LIST
+            stack.append([])
+        elif op == ")":     # EMPTY_TUPLE
+            stack.append(())
+        elif op == "d":     # DICT
+            items = pop_mark()
+            stack.append(dict(zip(items[0::2], items[1::2])))
+        elif op == "l":     # LIST
+            stack.append(pop_mark())
+        elif op == "t":     # TUPLE
+            stack.append(tuple(pop_mark()))
+        elif op in "\x85\x86\x87":  # TUPLE1 / TUPLE2 / TUPLE3
+            n = "\x85\x86\x87".index(op) + 1
+            items = stack[-n:]
+            del stack[-n:]
+            stack.append(tuple(items))
+        elif op == "s":     # SETITEM
+            value = stack.pop()
+            key = stack.pop()
+            stack[-1][key] = value
+        elif op == "u":     # SETITEMS
+            items = pop_mark()
+            for i in range(0, len(items), 2):
+                stack[-1][items[i]] = items[i + 1]
+        elif op == "a":     # APPEND
+            value = stack.pop()
+            stack[-1].append(value)
+        elif op == "e":     # APPENDS
+            items = pop_mark()  # take the items first, then the list under them
+            stack[-1].extend(items)
+        elif op == "N":
+            stack.append(None)
+        elif op == "\x88":
+            stack.append(True)
+        elif op == "\x89":
+            stack.append(False)
+        elif op == "K":     # BININT1
+            stack.append(struct.unpack("<B", take(1))[0])
+        elif op == "M":     # BININT2
+            stack.append(struct.unpack("<H", take(2))[0])
+        elif op == "J":     # BININT
+            stack.append(struct.unpack("<i", take(4))[0])
+        elif op == "\x8a":  # LONG1
+            n = struct.unpack("<B", take(1))[0]
+            raw = bytearray(take(n))
+            value = 0
+            for i, b in enumerate(raw):
+                value |= b << (8 * i)
+            if n and raw[-1] & 0x80:
+                value -= 1 << (8 * n)
+            stack.append(value)
+        elif op == "I":     # INT (protocol 0)
+            line = take_line()
+            if line == b"00":
+                stack.append(False)
+            elif line == b"01":
+                stack.append(True)
+            else:
+                stack.append(int(line))
+        elif op == "L":     # LONG (protocol 0)
+            stack.append(int(take_line().rstrip(b"L")))
+        elif op == "F":     # FLOAT (protocol 0)
+            stack.append(float(take_line()))
+        elif op == "G":     # BINFLOAT
+            stack.append(struct.unpack(">d", take(8))[0])
+        elif op == "\x8c":  # SHORT_BINUNICODE
+            stack.append(text(take(struct.unpack("<B", take(1))[0])))
+        elif op == "X":     # BINUNICODE
+            stack.append(text(take(struct.unpack("<I", take(4))[0])))
+        elif op == "\x8d":  # BINUNICODE8
+            stack.append(text(take(struct.unpack("<Q", take(8))[0])))
+        elif op == "V":     # UNICODE (protocol 0)
+            stack.append(take_line().decode("raw-unicode-escape"))
+        elif op == "U":     # SHORT_BINSTRING
+            stack.append(text(take(struct.unpack("<B", take(1))[0])))
+        elif op == "T":     # BINSTRING
+            stack.append(text(take(struct.unpack("<i", take(4))[0])))
+        elif op == "S":     # STRING (protocol 0)
+            raw = take_line().strip()
+            stack.append(text(raw[1:-1]))
+        elif op == "\x94":  # MEMOIZE
+            memo[len(memo)] = stack[-1]
+        elif op == "q":     # BINPUT
+            memo[struct.unpack("<B", take(1))[0]] = stack[-1]
+        elif op == "r":     # LONG_BINPUT
+            memo[struct.unpack("<I", take(4))[0]] = stack[-1]
+        elif op == "p":     # PUT
+            memo[int(take_line())] = stack[-1]
+        elif op == "h":     # BINGET
+            stack.append(memo[struct.unpack("<B", take(1))[0]])
+        elif op == "j":     # LONG_BINGET
+            stack.append(memo[struct.unpack("<I", take(4))[0]])
+        elif op == "g":     # GET
+            stack.append(memo[int(take_line())])
+        elif op == "0":     # POP
+            stack.pop()
+        else:
+            raise ValueError("salary_model.pkl contains unsupported data (opcode %r)." % op)
+
+
 def load_model(path=MODEL_PATH):
     if not os.path.exists(path):
-        raise FileNotFoundError(
-            f"Saved model not found: {path}\n"
-            "Copy salary_model.pkl from Laboratory Activity 1 next to app.py."
+        raise IOError(
+            "Saved model not found: %s\n"
+            "Copy salary_model.pkl from Laboratory Activity 1 next to app.py." % path
         )
     with open(path, "rb") as f:
-        data = pickle.load(f)
+        raw = f.read()
+    try:
+        data = pickle.loads(raw)
+    except Exception:
+        # Older Python that cannot read this pickle format -> built-in reader
+        data = read_simple_pickle(raw)
     if not isinstance(data, dict) or "coefficients" not in data or "education" not in data:
         raise ValueError("salary_model.pkl must contain 'coefficients' and 'education'.")
     if len(data["coefficients"]) != 4:
@@ -94,7 +310,7 @@ def load_model(path=MODEL_PATH):
 
 model = load_model()
 COEFFICIENTS = [float(c) for c in model["coefficients"]]
-EDUCATION_CODES = {str(k): v for k, v in model["education"].items()}
+EDUCATION_CODES = dict((to_text(k), v) for k, v in model["education"].items())
 # Education levels supported by the ORIGINAL model, in their encoded order
 EDUCATION_LEVELS = sorted(EDUCATION_CODES, key=EDUCATION_CODES.get)
 
@@ -121,29 +337,52 @@ def classify_salary(salary):
     return "HIGH"
 
 
+def _open_csv(mode):
+    if PY2:
+        return open(HISTORY_PATH, mode + "b")
+    return io.open(HISTORY_PATH, mode, newline="", encoding="utf-8")
+
+
 def save_history(records):
     with _history_lock:
         new_file = not os.path.exists(HISTORY_PATH) or os.path.getsize(HISTORY_PATH) == 0
-        with open(HISTORY_PATH, "a", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=HISTORY_FIELDS)
+        f = _open_csv("a")
+        try:
+            writer = csv.writer(f)
             if new_file:
-                writer.writeheader()
-            writer.writerows(records)
+                writer.writerow(HISTORY_FIELDS)
+            for record in records:
+                row = [to_text(record[k]) for k in HISTORY_FIELDS]
+                if PY2:
+                    row = [cell.encode("utf-8") for cell in row]
+                writer.writerow(row)
+        finally:
+            f.close()
 
 
 def read_history():
     if not os.path.exists(HISTORY_PATH):
         return []
-    with _history_lock, open(HISTORY_PATH, newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
-    for r in rows:
+    with _history_lock:
+        f = _open_csv("r")
+        try:
+            rows = list(csv.reader(f))
+        finally:
+            f.close()
+    if not rows:
+        return []
+    header = [to_text(h) for h in rows[0]]
+    records = []
+    for row in rows[1:]:
+        r = OrderedDict(zip(header, [to_text(c) for c in row]))
         for key in ("years_experience", "working_hours", "predicted_salary"):
             try:
                 value = float(r[key])
                 r[key] = int(value) if value.is_integer() and key != "predicted_salary" else value
-            except (TypeError, ValueError):
+            except (KeyError, TypeError, ValueError):
                 pass
-    return rows
+        records.append(r)
+    return records
 
 
 def make_record(request_type, name, education, exp, hours, salary, comparison_id=""):
@@ -161,58 +400,65 @@ def make_record(request_type, name, education, exp, hours, salary, comparison_id
     }
 
 
+def ordered(*pairs):
+    result = OrderedDict()
+    for key, value in pairs:
+        result[key] = value
+    return result
+
+
 # --------------------------------------------------------------------------
 # Validation
 # --------------------------------------------------------------------------
 class ValidationError(Exception):
     def __init__(self, errors):
-        super().__init__("Invalid input")
+        Exception.__init__(self, "Invalid input")
         self.errors = errors
 
 
 def _number(data, key, label, errors):
     raw = data.get(key)
-    if raw is None or (isinstance(raw, str) and raw.strip() == ""):
-        errors[key] = f"{label} is required."
+    if raw is None or (isinstance(raw, string_types) and raw.strip() == ""):
+        errors[key] = "%s is required." % label
         return None
     if isinstance(raw, bool):
-        errors[key] = f"{label} must be a number."
+        errors[key] = "%s must be a number." % label
         return None
     try:
         value = float(raw)
     except (TypeError, ValueError):
-        errors[key] = f"{label} must be a number."
+        errors[key] = "%s must be a number." % label
         return None
-    if not math.isfinite(value):
-        errors[key] = f"{label} must be a finite number."
+    if not is_finite(value):
+        errors[key] = "%s must be a finite number." % label
         return None
     return int(value) if value.is_integer() else value
 
 
 def validate_common(data, errors):
-    name = str(data.get("employee_name") or "").strip()
+    name = to_text(data.get("employee_name") or "").strip()
     if not name:
         errors["employee_name"] = "Employee name must not be empty."
 
-    education = str(data.get("education") or "").strip()
+    education = to_text(data.get("education") or "").strip()
     if education not in EDUCATION_CODES:
         errors["education"] = "Education must be one of: " + ", ".join(EDUCATION_LEVELS) + "."
 
     hours = _number(data, "working_hours", "Working hours", errors)
     if hours is not None and not (MIN_HOURS <= hours <= MAX_HOURS):
-        errors["working_hours"] = f"Working hours must be between {MIN_HOURS} and {MAX_HOURS} per week."
+        errors["working_hours"] = "Working hours must be between %d and %d per week." % (MIN_HOURS, MAX_HOURS)
     return name, education, hours
 
 
 def validate_experience(data, key, label, errors):
     exp = _number(data, key, label, errors)
     if exp is not None and exp < 0:
-        errors[key] = f"{label} must be 0 or greater."
+        errors[key] = "%s must be 0 or greater." % label
     return exp
 
 
 # --------------------------------------------------------------------------
-# Endpoint handlers (return plain dicts)
+# Endpoint handlers
 # --------------------------------------------------------------------------
 def handle_predict(data):
     errors = {}
@@ -224,16 +470,16 @@ def handle_predict(data):
     salary = predict_salary(education, exp, hours)
     record = make_record("predict", name, education, exp, hours, salary)
     save_history([record])
-    return {
-        "employee_name": name,
-        "education": education,
-        "working_hours": hours,
-        "years_experience": exp,
-        "predicted_salary": salary,
-        "salary_range": record["salary_range"],
-        "currency": CURRENCY,
-        "timestamp": record["timestamp"],
-    }
+    return ordered(
+        ("employee_name", name),
+        ("education", education),
+        ("working_hours", hours),
+        ("years_experience", exp),
+        ("predicted_salary", salary),
+        ("salary_range", record["salary_range"]),
+        ("currency", CURRENCY),
+        ("timestamp", record["timestamp"]),
+    )
 
 
 def handle_compare(data):
@@ -253,57 +499,60 @@ def handle_compare(data):
     rec2 = make_record("compare", name, education, exp2, hours, salary2, comparison_id)
     save_history([rec1, rec2])  # a comparison saves BOTH predictions
 
-    return {
-        "employee_name": name,
-        "education": education,
-        "working_hours": hours,
-        "experience_1": exp1,
-        "experience_2": exp2,
-        "predicted_salary_1": salary1,
-        "predicted_salary_2": salary2,
-        "salary_difference": round(salary2 - salary1, 2),
-        "salary_range_1": rec1["salary_range"],
-        "salary_range_2": rec2["salary_range"],
-        "currency": CURRENCY,
-        "comparison_id": comparison_id,
-        "timestamp": rec2["timestamp"],
-    }
+    return ordered(
+        ("employee_name", name),
+        ("education", education),
+        ("working_hours", hours),
+        ("experience_1", exp1),
+        ("experience_2", exp2),
+        ("predicted_salary_1", salary1),
+        ("predicted_salary_2", salary2),
+        ("salary_difference", round(salary2 - salary1, 2)),
+        ("salary_range_1", rec1["salary_range"]),
+        ("salary_range_2", rec2["salary_range"]),
+        ("currency", CURRENCY),
+        ("comparison_id", comparison_id),
+        ("timestamp", rec2["timestamp"]),
+    )
 
 
 def handle_history():
     records = read_history()
     records.reverse()  # newest first
-    return {"count": len(records), "currency": CURRENCY, "records": records}
+    return ordered(("count", len(records)), ("currency", CURRENCY), ("records", records))
 
 
 def handle_meta():
-    return {
-        "education_levels": EDUCATION_LEVELS,
-        "currency": CURRENCY,
-        "thresholds": {
-            "LOW": f"below {LOW_LIMIT:,}",
-            "MEDIUM": f"{LOW_LIMIT:,} to {HIGH_LIMIT - 0.01:,.2f}",
-            "HIGH": f"{HIGH_LIMIT:,} and above",
-        },
-        "working_hours_range": [MIN_HOURS, MAX_HOURS],
-        "training_records": model.get("training_records"),
-    }
+    return ordered(
+        ("education_levels", EDUCATION_LEVELS),
+        ("currency", CURRENCY),
+        ("thresholds", ordered(
+            ("LOW", "below " + money(LOW_LIMIT)),
+            ("MEDIUM", money(LOW_LIMIT) + " to " + money(HIGH_LIMIT - 0.01, 2)),
+            ("HIGH", money(HIGH_LIMIT) + " and above"),
+        )),
+        ("working_hours_range", [MIN_HOURS, MAX_HOURS]),
+        ("training_records", model.get("training_records")),
+    )
 
 
 def render_index():
     default = "Bachelor's Degree" if "Bachelor's Degree" in EDUCATION_CODES else EDUCATION_LEVELS[0]
     chips = "\n".join(
-        '<label class="chip"><input type="radio" name="education" value="{v}"{c}><span>{v}</span></label>'.format(
-            v=html.escape(level, quote=True), c=" checked" if level == default else ""
-        )
+        '<label class="chip"><input type="radio" name="education" value="%s"%s><span>%s</span></label>'
+        % (html_escape(level), " checked" if level == default else "", html_escape(level))
         for level in EDUCATION_LEVELS
     )
+    # HTML entities keep this file plain ASCII: &#8369; = peso sign
     footer = (
-        f"LOW &lt; ₱{LOW_LIMIT:,} · MEDIUM ₱{LOW_LIMIT:,}–₱{HIGH_LIMIT - 0.01:,.2f} · "
-        f"HIGH ≥ ₱{HIGH_LIMIT:,}"
+        "LOW &lt; &#8369;%s &middot; MEDIUM &#8369;%s&ndash;&#8369;%s &middot; HIGH &ge; &#8369;%s"
+        % (money(LOW_LIMIT), money(LOW_LIMIT), money(HIGH_LIMIT - 0.01, 2), money(HIGH_LIMIT))
     )
-    with open(TEMPLATE_PATH, encoding="utf-8") as f:
+    f = io.open(TEMPLATE_PATH, encoding="utf-8")
+    try:
         page = f.read()
+    finally:
+        f.close()
     values = {
         "education_chips": chips,
         "footer_ranges": footer,
@@ -313,7 +562,7 @@ def render_index():
         "max_hours": MAX_HOURS,
     }
     for key, value in values.items():
-        page = page.replace("{{ " + key + " }}", str(value))
+        page = page.replace("{{ " + key + " }}", to_text(value))
     return page
 
 
@@ -325,8 +574,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send(self, status, body, content_type="application/json; charset=utf-8", extra=None):
         if isinstance(body, (dict, list)):
-            body = json.dumps(body, ensure_ascii=False, indent=2)
-        if isinstance(body, str):
+            body = json.dumps(body, ensure_ascii=PY2, indent=2)
+        if isinstance(body, text_type):
             body = body.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -340,14 +589,14 @@ class Handler(BaseHTTPRequestHandler):
     def _payload(self):
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length).decode("utf-8") if length else ""
-        ctype = self.headers.get("Content-Type", "")
+        ctype = self.headers.get("Content-Type") or ""
         if "application/json" in ctype:
             try:
                 data = json.loads(raw or "{}")
-            except json.JSONDecodeError:
+            except ValueError:
                 return None
             return data if isinstance(data, dict) else None
-        return {k: v[0] for k, v in parse_qs(raw).items()}
+        return dict((to_text(k), to_text(v[0])) for k, v in parse_qs(raw).items())
 
     def do_GET(self):
         url = urlparse(self.path)
@@ -382,20 +631,23 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self._send(200, routes[path](data))
         except ValidationError as err:
-            self._send(400, {"error": "Invalid input.", "details": err.errors})
+            self._send(400, ordered(("error", "Invalid input."), ("details", err.errors)))
 
     def _serve_static(self, rel):
         full = os.path.realpath(os.path.join(STATIC_DIR, rel))
         if not full.startswith(os.path.realpath(STATIC_DIR) + os.sep) or not os.path.isfile(full):
             return self._send(404, {"error": "Not found."})
         ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
+        if full.endswith(".js"):
+            ctype = "application/javascript"
         if ctype.startswith("text/") or ctype.endswith("javascript"):
             ctype += "; charset=utf-8"
         with open(full, "rb") as f:
             self._send(200, f.read(), ctype)
 
     def log_message(self, fmt, *args):
-        print(f"[{datetime.now():%H:%M:%S}] {self.command} {self.path} -> {args[1] if len(args) > 1 else ''}")
+        status = args[1] if len(args) > 1 else ""
+        print("[%s] %s %s -> %s" % (datetime.now().strftime("%H:%M:%S"), self.command, self.path, status))
 
 
 def create_server(host=HOST, port=PORT):
@@ -407,9 +659,9 @@ def start_server(host=HOST, first_port=PORT, tries=10):
     for port in range(first_port, first_port + tries):
         try:
             return create_server(host, port)
-        except OSError:
-            print(f"Port {port} is busy, trying {port + 1}...")
-    raise OSError(f"No free port found between {first_port} and {first_port + tries - 1}.")
+        except (OSError, IOError):
+            print("Port %d is busy, trying %d..." % (port, port + 1))
+    raise IOError("No free port found between %d and %d." % (first_port, first_port + tries - 1))
 
 
 def open_browser(url):
@@ -417,21 +669,22 @@ def open_browser(url):
     try:
         webbrowser.open(url, new=2)
     except Exception:
-        print(f"Could not open the browser automatically. Please open {url}")
+        print("Could not open the browser automatically. Please open %s" % url)
 
 
 if __name__ == "__main__":
     server = start_server()
-    url = f"http://{HOST}:{server.server_address[1]}"
+    url = "http://%s:%d" % (HOST, server.server_address[1])
 
     print("=" * 60)
     print(" SalaryScope - Employee Salary Prediction System (OFFLINE)")
     print("=" * 60)
-    print(f" Model loaded : {MODEL_PATH}")
-    print(f" Coefficients : {COEFFICIENTS}")
-    print(f" Education    : {', '.join(EDUCATION_LEVELS)}")
-    print(f" History file : {HISTORY_PATH}")
-    print(f" Running at   : {url}")
+    print(" Python       : %s" % sys.version.split()[0])
+    print(" Model loaded : %s" % MODEL_PATH)
+    print(" Coefficients : %s" % COEFFICIENTS)
+    print(" Education    : %s" % ", ".join(EDUCATION_LEVELS))
+    print(" History file : %s" % HISTORY_PATH)
+    print(" Running at   : %s" % url)
     print(" Press Ctrl+C to stop.")
     print("=" * 60)
 

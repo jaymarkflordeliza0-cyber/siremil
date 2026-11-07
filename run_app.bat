@@ -9,6 +9,6 @@ if %errorlevel%==0 (
 )
 if errorlevel 1 (
     echo.
-    echo Could not start. Make sure Python 3.6 or newer is installed.
+    echo Could not start. Make sure Python is installed (2.7 or any 3.x).
     pause
 )

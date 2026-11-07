@@ -22,7 +22,11 @@ The education levels are read from the model and used for validation. The model 
 UI extras: light and dark mode, animated results, a salary-range meter, a comparison chart, a highlighted JSON output with a Copy button, history search and filters, summary stats, CSV download, and a mobile layout. There are no CDNs or web fonts, so everything works without internet.
 
 ## Requirements
-**Python 3.6 or newer** on Windows, macOS or Linux. Nothing else to install. Tested on Python 3.8, 3.9, 3.10, 3.11, 3.12, 3.13 and 3.14. Python 2 is not supported.
+**Any Python: 2.7 or any 3.x**, on Windows, macOS or Linux. Nothing else to install.
+
+- Tests pass on Python 3.8, 3.9, 3.10, 3.11, 3.12, 3.13 and 3.14.
+- Python 2.7 and 3.0-3.7 compatibility was checked with a static analyzer (vermin) but not run.
+- Python 2.7 and 3.0-3.3 cannot read pickle format 4, so `app.py` includes a small reader that loads the same `salary_model.pkl` on those versions. It reads plain data only and never runs code from the file.
 
 ## Run
 ```bash
@@ -47,6 +51,7 @@ curl http://127.0.0.1:5000/history?format=csv   # raw CSV
 ```bash
 python -m unittest test_app -v
 ```
+(The tests need Python 2.7 or 3.2+.)
 The tests cover 5 predictions, 2 comparisons, the classification thresholds, validation, and a simulated restart. They write to a temporary history file, so your real `salary_history.csv` is not changed.
 
 ## Files
