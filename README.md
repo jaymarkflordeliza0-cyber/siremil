@@ -27,8 +27,6 @@ python app.py            # starts the server AND opens the browser automatically
 python app.py --no-browser   # server only
 ```
 On Windows you can also just **double-click `run_app.bat`**. If port 5000 is busy, the app uses the next free port (5001, 5002, ...). Everything runs on `127.0.0.1` (this computer), so no internet is needed.
-```
-```
 
 ## API examples
 ```bash
