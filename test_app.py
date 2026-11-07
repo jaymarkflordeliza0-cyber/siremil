@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Automated checks for Activity 3 (steps 8-10). Works on Python 2.7 and 3.x.
+Automated checks for Activity 3 (steps 8-10). Works on Python 2.7 and 3.3+.
 
     python -m unittest test_app -v
 

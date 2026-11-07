@@ -51,7 +51,7 @@ curl http://127.0.0.1:5000/history?format=csv   # raw CSV
 ```bash
 python -m unittest test_app -v
 ```
-(The tests need Python 2.7 or 3.2+.)
+(The tests need Python 2.7 or 3.3+.)
 The tests cover 5 predictions, 2 comparisons, the classification thresholds, validation, and a simulated restart. They write to a temporary history file, so your real `salary_history.csv` is not changed.
 
 ## Files
