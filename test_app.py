@@ -8,10 +8,55 @@ Uses a temporary history file so your real salary_history.csv is untouched.
 
 import csv
 import importlib
+import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
+import urllib.error
+import urllib.request
+
+
+class Response:
+    def __init__(self, status, body):
+        self.status_code = status
+        self._body = body
+
+    def get_json(self):
+        return json.loads(self._body)
+
+
+class Client:
+    """Tiny HTTP client that talks to a real running server on a free port."""
+
+    def __init__(self, module):
+        self.server = module.create_server(port=0)
+        self.base = "http://127.0.0.1:%d" % self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def _open(self, req):
+        try:
+            with urllib.request.urlopen(req) as r:
+                return Response(r.status, r.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            return Response(e.code, e.read().decode("utf-8"))
+
+    def get(self, path):
+        return self._open(self.base + path)
+
+    def post(self, path, json=None):
+        req = urllib.request.Request(
+            self.base + path, data=_dumps(json).encode("utf-8"),
+            headers={"Content-Type": "application/json"}, method="POST")
+        return self._open(req)
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+_dumps = json.dumps
 
 
 def load_app(history_path):
@@ -26,10 +71,11 @@ class SalaryAppTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.history = os.path.join(self.tmp.name, "salary_history.csv")
         self.app = load_app(self.history)
-        self.client = self.app.app.test_client()
+        self.client = Client(self.app)
         self.edu = self.app.EDUCATION_LEVELS
 
     def tearDown(self):
+        self.client.close()
         self.tmp.cleanup()
         os.environ.pop("SALARY_HISTORY_PATH", None)
 
@@ -44,7 +90,7 @@ class SalaryAppTests(unittest.TestCase):
             ("Maria Santos", "Master's Degree", 8, 40),
             ("Pedro Reyes", "High School", 0, 40),
             ("Ana Lopez", "Doctorate", 15, 45),
-            ("Jose Garcia", "Vocational", 5, 60),
+            ("Jose Garcia", "Associate Degree", 5, 60),
         ]
         for name, edu, exp, hrs in cases:
             r = self.client.post("/predict", json={
@@ -121,7 +167,8 @@ class SalaryAppTests(unittest.TestCase):
         self.client.post("/predict", json={"employee_name": "Juan", "education": self.edu[0],
                                            "years_experience": 2, "working_hours": 40})
         app2 = load_app(self.history)  # "restart"
-        client2 = app2.app.test_client()
+        client2 = Client(app2)
+        self.addCleanup(client2.close)
         self.assertEqual(client2.get("/history").get_json()["count"], 1)
         r = client2.post("/compare", json={"employee_name": "Juan", "education": self.edu[0],
                                            "working_hours": 40, "experience_1": 1, "experience_2": 4})

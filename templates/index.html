@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SalaryScope · Employee Salary Prediction System</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='9' fill='%236d5efc'/><text x='16' y='22' font-size='17' font-family='Arial' font-weight='700' fill='white' text-anchor='middle'>₱</text></svg>">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="/static/css/style.css">
   <script>
     // Apply saved theme before paint (avoids a flash)
     (function () {
@@ -73,12 +73,7 @@
           <div class="field">
             <label>Education level</label>
             <div class="chips" data-name="education" role="radiogroup" aria-label="Education level">
-              {% for level in education_levels %}
-              <label class="chip">
-                <input type="radio" name="education" value="{{ level }}" {% if level == default_education %}checked{% endif %}>
-                <span>{{ level }}</span>
-              </label>
-              {% endfor %}
+              {{ education_chips }}
             </div>
             <small class="error" data-for="education"></small>
           </div>
@@ -145,12 +140,7 @@
           <div class="field">
             <label>Education level</label>
             <div class="chips" data-name="education" role="radiogroup" aria-label="Education level">
-              {% for level in education_levels %}
-              <label class="chip">
-                <input type="radio" name="education" value="{{ level }}" {% if level == default_education %}checked{% endif %}>
-                <span>{{ level }}</span>
-              </label>
-              {% endfor %}
+              {{ education_chips }}
             </div>
             <small class="error" data-for="education"></small>
           </div>
@@ -277,7 +267,7 @@
 
   <footer class="footer">
     Predictions by <code>salary_model.pkl</code> · History in <code>salary_history.csv</code> ·
-    LOW &lt; ₱{{ "{:,}".format(low_limit) }} · MEDIUM ₱{{ "{:,}".format(low_limit) }}–₱{{ "{:,.2f}".format(high_limit - 0.01) }} · HIGH ≥ ₱{{ "{:,}".format(high_limit) }}
+    {{ footer_ranges }}
   </footer>
 
   <div class="toasts" id="toasts" aria-live="polite"></div>
@@ -290,6 +280,6 @@
       maxHours: {{ max_hours }}
     };
   </script>
-  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  <script src="/static/js/app.js"></script>
 </body>
 </html>

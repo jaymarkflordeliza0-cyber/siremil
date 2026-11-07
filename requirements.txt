@@ -1,5 +1,1 @@
-flask
-scikit-learn
-pandas
-numpy
-joblib
+# No third-party packages needed — app.py uses only the Python standard library.

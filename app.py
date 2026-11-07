@@ -7,28 +7,33 @@ System flow:
     -> Classify Salary Range -> Save Prediction History
     -> Compare Two Experience Levels -> Calculate Difference -> Display JSON Output
 
-Runs completely offline. All salary values come from `salary_model.pkl`.
+Uses ONLY the Python standard library and runs completely offline.
+Every salary value comes from the saved Activity 1 model, `salary_model.pkl`.
 
     python app.py      ->  open http://127.0.0.1:5000
 """
 
 import csv
+import html
+import json
 import math
+import mimetypes
 import os
+import pickle
 import threading
 import uuid
 from datetime import datetime
-
-import joblib
-import pandas as pd
-from flask import Flask, Response, jsonify, render_template, request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.environ.get("SALARY_MODEL_PATH", os.path.join(BASE_DIR, "salary_model.pkl"))
 HISTORY_PATH = os.environ.get("SALARY_HISTORY_PATH", os.path.join(BASE_DIR, "salary_history.csv"))
+TEMPLATE_PATH = os.path.join(BASE_DIR, "templates", "index.html")
+STATIC_DIR = os.path.join(BASE_DIR, "static")
 
+HOST, PORT = "127.0.0.1", int(os.environ.get("PORT", "5000"))
 CURRENCY = "PHP"
-FEATURES = ["education", "years_experience", "working_hours"]
 MIN_HOURS, MAX_HOURS = 1, 168
 
 # Fixed classification thresholds (monthly salary, PHP)
@@ -52,56 +57,50 @@ _history_lock = threading.Lock()
 
 
 # --------------------------------------------------------------------------
-# Model loading (no retraining, ever)
+# Model loading (the Activity 1 model is used as-is — never retrained)
 # --------------------------------------------------------------------------
+# salary_model.pkl from Activity 1 is a dictionary:
+#   {
+#     "coefficients": [intercept, b_education, b_experience, b_hours],
+#     "education": {"High School": 0, "Associate Degree": 1, ...},
+#     "training_records": 24,
+#   }
+# predicted monthly salary =
+#   intercept + b_education * education_code + b_experience * years + b_hours * hours
 def load_model(path=MODEL_PATH):
     if not os.path.exists(path):
         raise FileNotFoundError(
             f"Saved model not found: {path}\n"
-            "Copy your salary_model.pkl from Activity 1 here "
-            "(or run `python train_model.py` once to create it)."
+            "Copy salary_model.pkl from Laboratory Activity 1 next to app.py."
         )
-    return joblib.load(path)
-
-
-def supported_education_levels(model):
-    """Read the education levels the ORIGINAL model was trained on."""
-    for _, step in getattr(model, "steps", [("", model)]):
-        transformers = getattr(step, "transformers_", None)
-        if not transformers:
-            continue
-        for _, encoder, columns in transformers:
-            if hasattr(encoder, "categories_") and "education" in list(columns):
-                idx = list(columns).index("education")
-                return [str(c) for c in encoder.categories_[idx]]
-    raise RuntimeError("Could not read supported education levels from the saved model.")
-
-
-def _order_levels(levels):
-    """Display order: by the model's own baseline prediction (0 yrs, 40 hrs/week)."""
-    try:
-        rows = pd.DataFrame([[lvl, 0, 40] for lvl in levels], columns=FEATURES)
-        preds = model.predict(rows)
-        return [lvl for _, lvl in sorted(zip(preds, levels))]
-    except Exception:
-        return levels
+    with open(path, "rb") as f:
+        data = pickle.load(f)
+    if not isinstance(data, dict) or "coefficients" not in data or "education" not in data:
+        raise ValueError("salary_model.pkl must contain 'coefficients' and 'education'.")
+    if len(data["coefficients"]) != 4:
+        raise ValueError("Expected 4 coefficients: intercept, education, experience, hours.")
+    return data
 
 
 model = load_model()
-EDUCATION_LEVELS = _order_levels(supported_education_levels(model))
-
-app = Flask(__name__)
-app.json.sort_keys = False
+COEFFICIENTS = [float(c) for c in model["coefficients"]]
+EDUCATION_CODES = {str(k): v for k, v in model["education"].items()}
+# Education levels supported by the ORIGINAL model, in their encoded order
+EDUCATION_LEVELS = sorted(EDUCATION_CODES, key=EDUCATION_CODES.get)
 
 
 # --------------------------------------------------------------------------
 # Core logic
 # --------------------------------------------------------------------------
 def predict_salary(education, years_experience, working_hours):
-    row = pd.DataFrame(
-        [[education, years_experience, working_hours]], columns=FEATURES
+    intercept, b_edu, b_exp, b_hours = COEFFICIENTS
+    salary = (
+        intercept
+        + b_edu * EDUCATION_CODES[education]
+        + b_exp * years_experience
+        + b_hours * working_hours
     )
-    return round(float(model.predict(row)[0]), 2)
+    return round(salary, 2)
 
 
 def classify_salary(salary):
@@ -130,9 +129,8 @@ def read_history():
     for r in rows:
         for key in ("years_experience", "working_hours", "predicted_salary"):
             try:
-                r[key] = float(r[key])
-                if r[key].is_integer() and key != "predicted_salary":
-                    r[key] = int(r[key])
+                value = float(r[key])
+                r[key] = int(value) if value.is_integer() and key != "predicted_salary" else value
             except (TypeError, ValueError):
                 pass
     return rows
@@ -162,13 +160,6 @@ class ValidationError(Exception):
         self.errors = errors
 
 
-def _payload():
-    data = request.get_json(silent=True)
-    if data is None:
-        data = request.form.to_dict() or request.args.to_dict()
-    return data if isinstance(data, dict) else {}
-
-
 def _number(data, key, label, errors):
     raw = data.get(key)
     if raw is None or (isinstance(raw, str) and raw.strip() == ""):
@@ -194,7 +185,7 @@ def validate_common(data, errors):
         errors["employee_name"] = "Employee name must not be empty."
 
     education = str(data.get("education") or "").strip()
-    if education not in EDUCATION_LEVELS:
+    if education not in EDUCATION_CODES:
         errors["education"] = "Education must be one of: " + ", ".join(EDUCATION_LEVELS) + "."
 
     hours = _number(data, "working_hours", "Working hours", errors)
@@ -211,41 +202,9 @@ def validate_experience(data, key, label, errors):
 
 
 # --------------------------------------------------------------------------
-# Routes
+# Endpoint handlers (return plain dicts)
 # --------------------------------------------------------------------------
-@app.errorhandler(ValidationError)
-def handle_validation(err):
-    return jsonify({"error": "Invalid input.", "details": err.errors}), 400
-
-
-@app.get("/")
-def index():
-    return render_template(
-        "index.html",
-        education_levels=EDUCATION_LEVELS,
-        default_education="Bachelor's Degree" if "Bachelor's Degree" in EDUCATION_LEVELS else EDUCATION_LEVELS[0],
-        low_limit=LOW_LIMIT,
-        high_limit=HIGH_LIMIT,
-        min_hours=MIN_HOURS,
-        max_hours=MAX_HOURS,
-    )
-
-
-@app.get("/meta")
-def meta():
-    return jsonify(
-        {
-            "education_levels": EDUCATION_LEVELS,
-            "currency": CURRENCY,
-            "thresholds": {"LOW": f"< {LOW_LIMIT}", "MEDIUM": f"{LOW_LIMIT} - {HIGH_LIMIT - 0.01}", "HIGH": f">= {HIGH_LIMIT}"},
-            "working_hours_range": [MIN_HOURS, MAX_HOURS],
-        }
-    )
-
-
-@app.post("/predict")
-def predict():
-    data = _payload()
+def handle_predict(data):
     errors = {}
     name, education, hours = validate_common(data, errors)
     exp = validate_experience(data, "years_experience", "Years of experience", errors)
@@ -255,24 +214,19 @@ def predict():
     salary = predict_salary(education, exp, hours)
     record = make_record("predict", name, education, exp, hours, salary)
     save_history([record])
-
-    return jsonify(
-        {
-            "employee_name": name,
-            "education": education,
-            "working_hours": hours,
-            "years_experience": exp,
-            "predicted_salary": salary,
-            "salary_range": record["salary_range"],
-            "currency": CURRENCY,
-            "timestamp": record["timestamp"],
-        }
-    )
+    return {
+        "employee_name": name,
+        "education": education,
+        "working_hours": hours,
+        "years_experience": exp,
+        "predicted_salary": salary,
+        "salary_range": record["salary_range"],
+        "currency": CURRENCY,
+        "timestamp": record["timestamp"],
+    }
 
 
-@app.post("/compare")
-def compare():
-    data = _payload()
+def handle_compare(data):
     errors = {}
     name, education, hours = validate_common(data, errors)
     exp1 = validate_experience(data, "experience_1", "Experience 1", errors)
@@ -289,45 +243,163 @@ def compare():
     rec2 = make_record("compare", name, education, exp2, hours, salary2, comparison_id)
     save_history([rec1, rec2])  # a comparison saves BOTH predictions
 
-    return jsonify(
-        {
-            "employee_name": name,
-            "education": education,
-            "working_hours": hours,
-            "experience_1": exp1,
-            "experience_2": exp2,
-            "predicted_salary_1": salary1,
-            "predicted_salary_2": salary2,
-            "salary_difference": round(salary2 - salary1, 2),
-            "salary_range_1": rec1["salary_range"],
-            "salary_range_2": rec2["salary_range"],
-            "currency": CURRENCY,
-            "comparison_id": comparison_id,
-            "timestamp": rec2["timestamp"],
-        }
-    )
+    return {
+        "employee_name": name,
+        "education": education,
+        "working_hours": hours,
+        "experience_1": exp1,
+        "experience_2": exp2,
+        "predicted_salary_1": salary1,
+        "predicted_salary_2": salary2,
+        "salary_difference": round(salary2 - salary1, 2),
+        "salary_range_1": rec1["salary_range"],
+        "salary_range_2": rec2["salary_range"],
+        "currency": CURRENCY,
+        "comparison_id": comparison_id,
+        "timestamp": rec2["timestamp"],
+    }
 
 
-@app.get("/history")
-def history():
+def handle_history():
     records = read_history()
-    if request.args.get("format") == "csv":
-        content = ""
-        if os.path.exists(HISTORY_PATH):
-            with open(HISTORY_PATH, encoding="utf-8") as f:
-                content = f.read()
-        return Response(
-            content,
-            mimetype="text/csv",
-            headers={"Content-Disposition": "attachment; filename=salary_history.csv"},
-        )
     records.reverse()  # newest first
-    return jsonify({"count": len(records), "currency": CURRENCY, "records": records})
+    return {"count": len(records), "currency": CURRENCY, "records": records}
+
+
+def handle_meta():
+    return {
+        "education_levels": EDUCATION_LEVELS,
+        "currency": CURRENCY,
+        "thresholds": {
+            "LOW": f"below {LOW_LIMIT:,}",
+            "MEDIUM": f"{LOW_LIMIT:,} to {HIGH_LIMIT - 0.01:,.2f}",
+            "HIGH": f"{HIGH_LIMIT:,} and above",
+        },
+        "working_hours_range": [MIN_HOURS, MAX_HOURS],
+        "training_records": model.get("training_records"),
+    }
+
+
+def render_index():
+    default = "Bachelor's Degree" if "Bachelor's Degree" in EDUCATION_CODES else EDUCATION_LEVELS[0]
+    chips = "\n".join(
+        '<label class="chip"><input type="radio" name="education" value="{v}"{c}><span>{v}</span></label>'.format(
+            v=html.escape(level, quote=True), c=" checked" if level == default else ""
+        )
+        for level in EDUCATION_LEVELS
+    )
+    footer = (
+        f"LOW &lt; ₱{LOW_LIMIT:,} · MEDIUM ₱{LOW_LIMIT:,}–₱{HIGH_LIMIT - 0.01:,.2f} · "
+        f"HIGH ≥ ₱{HIGH_LIMIT:,}"
+    )
+    with open(TEMPLATE_PATH, encoding="utf-8") as f:
+        page = f.read()
+    values = {
+        "education_chips": chips,
+        "footer_ranges": footer,
+        "low_limit": LOW_LIMIT,
+        "high_limit": HIGH_LIMIT,
+        "min_hours": MIN_HOURS,
+        "max_hours": MAX_HOURS,
+    }
+    for key, value in values.items():
+        page = page.replace("{{ " + key + " }}", str(value))
+    return page
+
+
+# --------------------------------------------------------------------------
+# HTTP server (standard library only)
+# --------------------------------------------------------------------------
+class Handler(BaseHTTPRequestHandler):
+    server_version = "SalaryScope/1.0"
+
+    def _send(self, status, body, content_type="application/json; charset=utf-8", extra=None):
+        if isinstance(body, (dict, list)):
+            body = json.dumps(body, ensure_ascii=False, indent=2)
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _payload(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length).decode("utf-8") if length else ""
+        ctype = self.headers.get("Content-Type", "")
+        if "application/json" in ctype:
+            try:
+                data = json.loads(raw or "{}")
+            except json.JSONDecodeError:
+                return None
+            return data if isinstance(data, dict) else None
+        return {k: v[0] for k, v in parse_qs(raw).items()}
+
+    def do_GET(self):
+        url = urlparse(self.path)
+        path = url.path
+        if path in ("/", "/index.html"):
+            return self._send(200, render_index(), "text/html; charset=utf-8")
+        if path == "/history":
+            if parse_qs(url.query).get("format") == ["csv"]:
+                content = b""
+                if os.path.exists(HISTORY_PATH):
+                    with open(HISTORY_PATH, "rb") as f:
+                        content = f.read()
+                return self._send(
+                    200, content, "text/csv; charset=utf-8",
+                    {"Content-Disposition": "attachment; filename=salary_history.csv"},
+                )
+            return self._send(200, handle_history())
+        if path == "/meta":
+            return self._send(200, handle_meta())
+        if path.startswith("/static/"):
+            return self._serve_static(path[len("/static/"):])
+        self._send(404, {"error": "Not found."})
+
+    def do_POST(self):
+        path = urlparse(self.path).path
+        routes = {"/predict": handle_predict, "/compare": handle_compare}
+        if path not in routes:
+            return self._send(404, {"error": "Not found."})
+        data = self._payload()
+        if data is None:
+            return self._send(400, {"error": "Request body must be a JSON object."})
+        try:
+            self._send(200, routes[path](data))
+        except ValidationError as err:
+            self._send(400, {"error": "Invalid input.", "details": err.errors})
+
+    def _serve_static(self, rel):
+        full = os.path.realpath(os.path.join(STATIC_DIR, rel))
+        if not full.startswith(os.path.realpath(STATIC_DIR) + os.sep) or not os.path.isfile(full):
+            return self._send(404, {"error": "Not found."})
+        ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
+        if ctype.startswith("text/") or ctype.endswith("javascript"):
+            ctype += "; charset=utf-8"
+        with open(full, "rb") as f:
+            self._send(200, f.read(), ctype)
+
+    def log_message(self, fmt, *args):
+        print(f"[{datetime.now():%H:%M:%S}] {self.command} {self.path} -> {args[1] if len(args) > 1 else ''}")
+
+
+def create_server(host=HOST, port=PORT):
+    return ThreadingHTTPServer((host, port), Handler)
 
 
 if __name__ == "__main__":
     print(f"Model loaded : {MODEL_PATH}")
+    print(f"Coefficients : {COEFFICIENTS}")
     print(f"Education    : {', '.join(EDUCATION_LEVELS)}")
     print(f"History file : {HISTORY_PATH}")
-    print("Open http://127.0.0.1:5000 in your browser (works offline).")
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    print(f"Open http://{HOST}:{PORT} in your browser (works offline). Press Ctrl+C to stop.")
+    server = create_server()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nServer stopped.")

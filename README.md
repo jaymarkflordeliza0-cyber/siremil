@@ -1,6 +1,14 @@
 # SalaryScope — Employee Salary Prediction System
 
-**Activity 3: Salary Comparison and Prediction History.** A Flask app that runs entirely offline. Every salary it shows comes from the saved `salary_model.pkl`.
+**Activity 3: Salary Comparison and Prediction History.** It runs entirely offline and uses **only the Python standard library**, so there is nothing to install. Every salary it shows comes from the Activity 1 model, `salary_model.pkl`.
+
+## The saved model (from Activity 1)
+`salary_model.pkl` is a dictionary with `coefficients` = `[intercept, education, experience, hours]`, an `education` code map (High School=0 … Doctorate=4), and `training_records`. The app computes:
+
+```
+salary = intercept + b_edu × education_code + b_exp × years_experience + b_hours × working_hours
+```
+The education levels are read from the model and used for validation. The model is never retrained.
 
 ## Features
 | Feature | Where |
@@ -15,10 +23,8 @@ UI extras: light and dark mode, animated results, a salary-range meter, a compar
 
 ## Run
 ```bash
-pip install -r requirements.txt        # only if not installed yet
 python app.py                          # open http://127.0.0.1:5000
 ```
-> **Using your own Activity 1 model?** Put your `salary_model.pkl` next to `app.py`. The app reads the supported education levels directly from the model. If you don't have one, run `python train_model.py` **once** to create it. The app itself never retrains.
 
 ## API examples
 ```bash
@@ -39,4 +45,4 @@ python -m unittest test_app -v
 The tests cover 5 predictions, 2 comparisons, the classification thresholds, validation, and a simulated restart. They write to a temporary history file, so your real `salary_history.csv` is not changed.
 
 ## Files
-`app.py` (server) · `train_model.py` (Activity 1 training, run once) · `salary_model.pkl` (saved model) · `salary_data.csv` (training data) · `templates/` + `static/` (UI) · `test_app.py` · `salary_history.csv` (created automatically)
+`app.py` (server) · `salary_model.pkl` (Activity 1 saved model) · `templates/` + `static/` (UI) · `test_app.py` · `salary_history.csv` (created automatically)
