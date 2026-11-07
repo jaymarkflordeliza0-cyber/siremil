@@ -55,4 +55,4 @@ python -m unittest test_app -v
 The tests cover 5 predictions, 2 comparisons, the classification thresholds, validation, and a simulated restart. They write to a temporary history file, so your real `salary_history.csv` is not changed.
 
 ## Files
-`app.py` (server) · `run_app.bat` (double-click launcher) · `salary_model.pkl` (Activity 1 saved model) · `templates/` + `static/` (UI) · `test_app.py` · `salary_history.csv` (created automatically)
+`app.py` (server) · `run_app.bat` (double-click launcher) · `salary_model.pkl` (Activity 1 saved model) · `make_model.py` (recreates that exact file if it gets lost or replaced) · `templates/` + `static/` (UI) · `test_app.py` · `salary_history.csv` (created automatically)
