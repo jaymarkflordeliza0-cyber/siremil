@@ -30,12 +30,15 @@ salary = intercept + b_edu * education_code + b_exp * years_experience + b_hours
 
 UI extras: light and dark mode, animated results, a salary-range meter, a comparison chart, a highlighted JSON output with a Copy button, history search and filters, summary stats, CSV download, and a mobile layout. There are no CDNs or web fonts, so everything works without internet.
 
-## Requirements
-**Any Python: 2.7 or any 3.x**, on Windows, macOS or Linux. Nothing else to install.
+## Requirements (works on other PCs)
+| Part | Works on |
+|---|---|
+| Python (`app.py`, `train_model.py`) | **Python 2.7 and every Python 3.** Nothing to install (standard library only). Tests pass on 3.8 to 3.14; 2.7 and 3.0 to 3.7 were checked with a static analyzer (vermin), not run. |
+| JavaScript (`static/js/app.js`) | Written in classic **ES5** JavaScript (no arrow functions, `let`/`const`, template strings, `async`/`await` or `fetch`), checked with the acorn parser, so it runs in old and new browsers. |
+| CSS (`static/css/style.css`) | Has fallbacks for older browsers (`inset`, `place-items`, `clamp()`). Internet Explorer is not supported, because it lacks CSS variables. |
+| Internet | Not needed. Everything runs on this computer (`127.0.0.1`). |
 
-- Tests pass on Python 3.8, 3.9, 3.10, 3.11, 3.12, 3.13 and 3.14.
-- Python 2.7 and 3.0-3.7 compatibility was checked with a static analyzer (vermin) but not run.
-- Python 2.7 and 3.0-3.3 cannot read pickle format 4, so `app.py` includes a small reader that loads the same `salary_model.pkl` on those versions. It reads plain data only and never runs code from the file.
+To use it on another PC, copy the whole folder and run `python app.py` (or double-click `run_app.bat` on Windows).
 
 ## Run
 ```bash
